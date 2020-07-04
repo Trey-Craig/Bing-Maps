@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title></title>
+    <meta charset="utf-8" />
+    <script type='text/javascript'>
+    var map, searchManager, directionsManager, animatedLayer;
+
+
+    //Weather tile url from Iowa Environmental Mesonet (IEM): https://mesonet.agron.iastate.edu/ogc/
+    var urlTemplate = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-{timestamp}/{zoom}/{x}/{y}.png';
+
+    //The time stamps values for the IEM service for the last 50 minutes broken up into 5 minute increments.
+    var timestamps = ['900913-m50m', '900913-m45m', '900913-m40m', '900913-m35m', '900913-m30m', '900913-m25m', '900913-m20m', '900913-m15m', '900913-m10m', '900913-m05m', '900913'];
+
+    function GetMap()
+        {
+            map = new Microsoft.Maps.Map('#myMap', {});
+
+            // //Create a pushpin.
+            // var pushpin = new Microsoft.Maps.Pushpin(map.getCenter());
+            // map.entities.push(pushpin);
+
+            //Load the directions module.
+            Microsoft.Maps.loadModule('Microsoft.Maps.Directions', function () {
+                //Create an instance of the directions manager.
+                directionsManager = new Microsoft.Maps.Directions.DirectionsManager(map);
+
+                //Specify where to display the route instructions.
+                directionsManager.setRenderOptions({ itineraryContainer: '#directionsItinerary' });
+
+                //Specify the where to display the input panel
+                directionsManager.showInputPanel('directionsPanel');
+
+                //Create waypoints to route between.
+                var seattleWaypoint = new Microsoft.Maps.Directions.Waypoint({ address: 'Seatle, WA' });
+                directionsManager.addWaypoint(seattleWaypoint);
+
+                var workWaypoint = new Microsoft.Maps.Directions.Waypoint({ address: 'Redmond, WA' });
+                directionsManager.addWaypoint(workWaypoint);
+
+                //Add event handlers to directions manager.
+                Microsoft.Maps.Events.addHandler(directionsManager, 'directionsError', directionsError);
+                Microsoft.Maps.Events.addHandler(directionsManager, 'directionsUpdated', directionsUpdated);
+
+                //Add mouse events to the map.
+                Microsoft.Maps.Events.addHandler(map, 'click', function () { highlight('mapClick'); });
+
+                //Calculate directions.
+                directionsManager.calculateDirections();
+
+                var tileSources = [];
+
+            //Create a tile source for each time stamp.
+            for (var i = 0; i < timestamps.length; i++) {
+                var tileSource = new Microsoft.Maps.TileSource({
+                    uriConstructor: urlTemplate.replace('{timestamp}', timestamps[i])
+                });
+                tileSources.push(tileSource);
+            }
+
+            //Create the animated tile layer and add it to the map.
+            animatedLayer = new Microsoft.Maps.AnimatedTileLayer({
+                mercator: tileSources,
+                frameRate: 500
+            });
+            map.layers.insert(animatedLayer);
+                });
+        }
+
+        function highlight(id) {
+        //Highlight the div to indicate that the event has fired.
+        document.getElementById(id).style.background = 'LightGreen';
+
+        //Remove the highlighting after a second.
+        setTimeout(function () { document.getElementById(id).style.background = 'white'; }, 1000);
+    }
+ 
+
+        function directionsUpdated(e) {
+            //Get the current route index.
+            var routeIdx = directionsManager.getRequestOptions().routeIndex;
+
+            //Get the distance of the route, rounded to 2 decimal places.
+            var distance = Math.round(e.routeSummary[routeIdx].distance * 100)/100;
+
+            //Get the distance units used to calculate the route.
+            var units = directionsManager.getRequestOptions().distanceUnit;
+            var distanceUnits = '';
+
+            if (units == Microsoft.Maps.Directions.DistanceUnit.km) {
+                distanceUnits = 'km'
+            } else {
+                //Must be in miles
+                distanceUnits = 'miles'
+            }
+
+            //Time is in seconds, convert to minutes and round off.
+            var time = Math.round(e.routeSummary[routeIdx].timeWithTraffic / 60);
+
+            document.getElementById('routeInfoPanel').innerHTML = 'Distance: ' + distance + ' ' + distanceUnits + '<br/>Time with Traffic: ' + time + ' minutes';
+        }
+
+        function directionsError(e) {
+            alert('Error: ' + e.message + '\r\nResponse Code: ' + e.responseCode)
+        }
+
+    function Search() {
+        if (!searchManager) {
+            //Create an instance of the search manager and perform the search.
+            Microsoft.Maps.loadModule('Microsoft.Maps.Search', function () {
+                searchManager = new Microsoft.Maps.Search.SearchManager(map);
+                Search()
+            });
+        } else {
+            //Remove any previous results from the map.
+            map.entities.clear();
+
+            //Get the users query and geocode it.
+            var query = document.getElementById('searchTbx').value;
+            geocodeQuery(query);
+        }
+    }
+
+    function geocodeQuery(query) {
+        var searchRequest = {
+            where: query,
+            callback: function (r) {
+                if (r && r.results && r.results.length > 0) {
+                    var pin, pins = [], locs = [], output = 'Results:<br/>';
+
+                    for (var i = 0; i < r.results.length; i++) {
+                        //Create a pushpin for each result. 
+                        pin = new Microsoft.Maps.Pushpin(r.results[i].location, {
+                            text: i + ''
+                        });
+                        pins.push(pin);
+                        locs.push(r.results[i].location);
+
+                        output += i + ') ' + r.results[i].name + '<br/>';
+                    }
+
+                    //Add the pins to the map
+                    map.entities.push(pins);
+
+                    //Display list of results
+                    document.getElementById('output').innerHTML = output;
+
+                    //Determine a bounding box to best view the results.
+                    var bounds;
+
+                    if (r.results.length == 1) {
+                        bounds = r.results[0].bestView;
+                    } else {
+                        //Use the locations from the results to calculate a bounding box.
+                        bounds = Microsoft.Maps.LocationRect.fromLocations(locs);
+                    }
+
+                    map.setView({ bounds: bounds });
+                }
+            },
+            errorCallback: function (e) {
+                //If there is an error, alert the user about it.
+                alert("No results found.");
+            }
+        };
+
+        //Make the geocode request.
+        searchManager.geocode(searchRequest);
+    }
+    </script>
+
+<style>
+    html, body{
+        padding:10;
+        margin:0;
+        height:100%;
+    }
+    .directionsContainer{
+        width:380px;
+        height:100%;
+        overflow-y:auto;
+        float:left;
+    }
+
+    #myMap{
+        position:relative;
+        width:calc(100% - 380px);
+        height:100%;
+        float:left;
+    }
+</style>
+    
+    <script type='text/javascript' src='https://www.bing.com/api/maps/mapcontrol?callback=GetMap&key=AgFMn4J18EU6dq_Y7fe7FoJ4g6OkOdSNywK6TXUJsUxyBxpsdkbxZ_7IQK6duAVB' async defer></script>
+</head>
+<body>
+    <input id='searchTbx' type='text'/>
+    <input type='button'value='Search' onclick='Search()'/>
+    <br/>
+    <div id="myMap" style="position:relative;width:1000px;height:800px;float:left;"></div>
+    <div id='output' style="margin-left:10px;float:left;padding:10;"></div>
+    <div id='routeInfoPanel'></div>
+    <div class="directionsContainer">
+        <div id="directionsPanel"></div>
+        <div id="directionsItinerary"></div>
+    </div>
+</body>
+</html>
